@@ -1,6 +1,6 @@
 # Import necessary libraries
-from backtesting.lib import crossover
 from backtesting import Backtest, Strategy
+from backtesting.lib import crossover # <-- FIX: Add this import
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -17,7 +17,6 @@ class MeanReversion(Strategy):
         rolling_mean = price_series.rolling(window=self.bb_period).mean()
         rolling_std = price_series.rolling(window=self.bb_period).std()
         
-        # --- NEW: Define Middle Band for Exit ---
         self.middle_band = self.I(lambda: rolling_mean)
         self.upper_band = self.I(lambda: rolling_mean + (rolling_std * self.bb_std_dev))
         self.lower_band = self.I(lambda: rolling_mean - (rolling_std * self.bb_std_dev))
@@ -29,7 +28,7 @@ class MeanReversion(Strategy):
         if crossover(self.lower_band, self.data.Close) and not self.position:
             self.buy(sl=sl_price)
             
-        # --- NEW: Exit Condition: Close if price crosses back above the middle band ---
+        # Exit Condition: Close if price crosses back above the middle band
         elif crossover(self.data.Close, self.middle_band) and self.position:
             self.position.close()
 
