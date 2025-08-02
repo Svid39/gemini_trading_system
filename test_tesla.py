@@ -4,8 +4,7 @@ from backtesting.lib import crossover
 import yfinance as yf
 import pandas as pd
 
-# --- NEW: RSI Helper Function ---
-# We define the RSI calculation here so we don't need new libraries
+# RSI Helper Function
 def rsi(array, n):
     """Calculate Relative Strength Index (RSI)"""
     gain = pd.Series(array).diff()
@@ -19,29 +18,26 @@ def rsi(array, n):
 
 # Define the trading strategy
 class SmaCross(Strategy):
-    # Use the optimal parameters from our last successful run
+    # Use the optimal parameters from our best run
     n1 = 80
     n2 = 160
-    stop_loss = 0.85 # Represents a 15% stop-loss (1.0 - 0.15)
-    rsi_period = 14 # Standard period for RSI
-    rsi_upper_threshold = 70 # Overbought level
+    stop_loss = 0.85 # Represents a 15% stop-loss
+    rsi_period = 14
+    rsi_dip_threshold = 40 # The "dip" level for RSI
 
     def init(self):
-        # Indicators for the strategy
+        # Indicators
         self.sma1 = self.I(lambda x: pd.Series(x).rolling(self.n1).mean(), self.data.Close)
         self.sma2 = self.I(lambda x: pd.Series(x).rolling(self.n2).mean(), self.data.Close)
-        # --- NEW: Add RSI indicator ---
         self.rsi = self.I(rsi, self.data.Close, self.rsi_period)
 
     def next(self):
-        # Define the stop-loss price
         sl_price = self.data.Close[-1] * self.stop_loss
         
-        # --- NEW: RSI filter condition ---
-        is_momentum_ok = self.rsi[-1] < self.rsi_upper_threshold
-
-        # Check for buy signal and if momentum is not overbought
-        if is_momentum_ok and crossover(self.sma1, self.sma2) and not self.position:
+        # --- NEW: "Buy the Dip" Entry Logic ---
+        is_uptrend = self.sma1[-1] > self.sma2[-1]
+        
+        if is_uptrend and crossover(self.rsi, self.rsi_dip_threshold) and not self.position:
             self.buy(sl=sl_price)
             
         elif crossover(self.sma2, self.sma1) and self.position:
@@ -58,11 +54,10 @@ if isinstance(data.columns, pd.MultiIndex):
 data.columns = [col.capitalize() for col in data.columns]
 
 # --- Set up and Run the Backtest ---
-# We are not optimizing this time, just running with our best parameters + the new RSI rule
 bt = Backtest(data, SmaCross, cash=10000, commission=.001)
 stats = bt.run()
 
 # --- Print and Plot Results ---
-print("\n--- Backtest Results (SMA Crossover + RSI Filter) ---")
+print("\n--- Backtest Results (Buy the Dip with RSI) ---")
 print(stats)
 bt.plot()
