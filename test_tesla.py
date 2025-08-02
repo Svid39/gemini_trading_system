@@ -4,28 +4,26 @@ from backtesting.lib import crossover
 import yfinance as yf
 import pandas as pd
 
-# Define the IMPROVED trading strategy
+# Define the trading strategy
 class SmaCross(Strategy):
-    n1 = 50  # Fast moving average
-    n2 = 200 # Slow moving average
+    # Parameters to optimize
+    n1 = 50
+    n2 = 200
+    stop_loss = 0.85 # Represents a 15% stop-loss (1.0 - 0.15)
 
     def init(self):
-        # Calculate the two moving averages
         self.sma1 = self.I(lambda x: pd.Series(x).rolling(self.n1).mean(), self.data.Close)
         self.sma2 = self.I(lambda x: pd.Series(x).rolling(self.n2).mean(), self.data.Close)
 
     def next(self):
-        # Define the stop-loss price (15% below the current price)
-        stop_loss_price = self.data.Close[-1] * 0.85
+        # Calculate the stop-loss price based on the parameter
+        sl_price = self.data.Close[-1] * self.stop_loss
 
-        # If the fast SMA crosses above the slow SMA AND we don't have a position open
         if crossover(self.sma1, self.sma2) and not self.position:
-            # Buy with a 15% stop-loss
-            self.buy(sl=stop_loss_price)
+            # Use the stop-loss parameter in the buy order
+            self.buy(sl=sl_price)
             
-        # If the fast SMA crosses below the slow SMA AND we have a position open
         elif crossover(self.sma2, self.sma1) and self.position:
-            # Close the existing long position (don't open a short)
             self.position.close()
 
 # Download Tesla (TSLA) data
@@ -38,13 +36,21 @@ if isinstance(data.columns, pd.MultiIndex):
     data.columns = data.columns.get_level_values(0)
 data.columns = [col.capitalize() for col in data.columns]
 
-# Set up and run the backtest
+# --- Set up and Run Optimization ---
 bt = Backtest(data, SmaCross, cash=10000, commission=.001)
-stats = bt.run()
 
-# Print the results
-print("\n--- Backtest Results (v2: Long-Only + Stop-Loss) ---")
+print("\nRunning optimization... this will take some time.")
+stats = bt.optimize(
+    n1=range(10, 81, 10),
+    n2=range(100, 251, 20),
+    stop_loss=[0.85, 0.90, 0.95],  # Test 15%, 10%, and 5% stop-losses
+    maximize='Equity Final [$]',
+    constraint=lambda p: p.n1 < p.n2)
+
+# --- Print and Plot Results ---
+print("\n--- Best Backtest Results (Optimized with Stop-Loss) ---")
 print(stats)
-
-# Generate an interactive plot
+print("\n--- Optimal Parameters ---")
+print(stats._strategy)
+print("\nPlotting the backtest with optimal parameters...")
 bt.plot()
