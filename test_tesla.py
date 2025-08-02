@@ -4,74 +4,65 @@ from backtesting.lib import crossover
 import yfinance as yf
 import pandas as pd
 
+# --- NEW: RSI Helper Function ---
+# We define the RSI calculation here so we don't need new libraries
+def rsi(array, n):
+    """Calculate Relative Strength Index (RSI)"""
+    gain = pd.Series(array).diff()
+    loss = gain.copy()
+    gain[gain < 0] = 0
+    loss[loss > 0] = 0
+    rs_gain = gain.ewm(com=n-1, min_periods=n).mean()
+    rs_loss = loss.abs().ewm(com=n-1, min_periods=n).mean()
+    rs = rs_gain / rs_loss
+    return 100 - 100 / (1 + rs)
+
 # Define the trading strategy
 class SmaCross(Strategy):
-    # Parameters to optimize
-    n1 = 50
-    n2 = 200
+    # Use the optimal parameters from our last successful run
+    n1 = 80
+    n2 = 160
     stop_loss = 0.85 # Represents a 15% stop-loss (1.0 - 0.15)
+    rsi_period = 14 # Standard period for RSI
+    rsi_upper_threshold = 70 # Overbought level
 
     def init(self):
-        # Indicators for the primary asset (TSLA)
+        # Indicators for the strategy
         self.sma1 = self.I(lambda x: pd.Series(x).rolling(self.n1).mean(), self.data.Close)
         self.sma2 = self.I(lambda x: pd.Series(x).rolling(self.n2).mean(), self.data.Close)
-        
-        # --- NEW: Market filter indicators ---
-        # These are passed in with the data
-        self.spy_close = self.I(lambda: self.data.Spy_close, name="SPY_Close")
-        self.spy_sma = self.I(lambda: self.data.Spy_sma, name="SPY_SMA")
+        # --- NEW: Add RSI indicator ---
+        self.rsi = self.I(rsi, self.data.Close, self.rsi_period)
 
     def next(self):
         # Define the stop-loss price
         sl_price = self.data.Close[-1] * self.stop_loss
         
-        # --- NEW: Market filter condition ---
-        is_market_healthy = self.spy_close[-1] > self.spy_sma[-1]
+        # --- NEW: RSI filter condition ---
+        is_momentum_ok = self.rsi[-1] < self.rsi_upper_threshold
 
-        # Check for buy signal and if the market is healthy
-        if is_market_healthy and crossover(self.sma1, self.sma2) and not self.position:
+        # Check for buy signal and if momentum is not overbought
+        if is_momentum_ok and crossover(self.sma1, self.sma2) and not self.position:
             self.buy(sl=sl_price)
             
         elif crossover(self.sma2, self.sma1) and self.position:
             self.position.close()
 
-# --- Step 1: Download Data for both TSLA and the Market (SPY) ---
-print("Downloading TSLA and SPY data...")
-tsla_data = yf.download('TSLA', start='2015-01-01', end='2025-01-01')
-spy_data = yf.download('SPY', start='2015-01-01', end='2025-01-01')
+# Download Tesla (TSLA) data
+print("Downloading TSLA data...")
+data = yf.download('TSLA', start='2015-01-01', end='2025-01-01')
 print("Data download complete.")
 
-# --- Step 2: Prepare the Data and Add the Filter ---
-# Clean TSLA data
-if isinstance(tsla_data.columns, pd.MultiIndex):
-    tsla_data.columns = tsla_data.columns.get_level_values(0)
-tsla_data.columns = [col.capitalize() for col in tsla_data.columns]
+# --- Data Cleaning ---
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.get_level_values(0)
+data.columns = [col.capitalize() for col in data.columns]
 
-# Prepare SPY filter data
-spy_filter = pd.DataFrame()
-spy_filter['Spy_close'] = spy_data['Close']
-spy_filter['Spy_sma'] = spy_data['Close'].rolling(200).mean()
-
-# Merge the TSLA data with the SPY filter data
-# This adds the 'Spy_close' and 'Spy_sma' columns to our main dataframe
-data = pd.concat([tsla_data, spy_filter], axis=1)
-data.dropna(inplace=True) # Remove rows with missing data (e.g., the first 200 days for the SPY SMA)
-
-# --- Step 3: Run the Optimization ---
+# --- Set up and Run the Backtest ---
+# We are not optimizing this time, just running with our best parameters + the new RSI rule
 bt = Backtest(data, SmaCross, cash=10000, commission=.001)
-
-print("\nRunning optimization with market filter... this may take some time.")
-stats = bt.optimize(
-    n1=range(10, 81, 10),
-    n2=range(100, 251, 20),
-    stop_loss=[0.85, 0.90, 0.95],  # Test 15%, 10%, and 5% stop-losses
-    maximize='Max. Drawdown [%]', # Let's try to minimize drawdown this time
-    constraint=lambda p: p.n1 < p.n2)
+stats = bt.run()
 
 # --- Print and Plot Results ---
-print("\n--- Best Backtest Results (Optimized with Market Filter) ---")
+print("\n--- Backtest Results (SMA Crossover + RSI Filter) ---")
 print(stats)
-print("\n--- Optimal Parameters ---")
-print(stats._strategy)
-print("\nPlotting the backtest with optimal parameters...")
 bt.plot()
